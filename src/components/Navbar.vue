@@ -1,6 +1,11 @@
 <template>
   <div>
-    <nav :class="{ 'has-custom-titlebar': hasCustomTitlebar }">
+    <nav
+      :class="{
+        'has-custom-titlebar': hasCustomTitlebar,
+        'mobile-search-open': mobileSearchOpen,
+      }"
+    >
       <Win32Titlebar v-if="enableWin32Titlebar" />
       <LinuxTitlebar v-if="enableLinuxTitlebar" />
       <div class="navigation-buttons">
@@ -12,6 +17,11 @@
         /></button-icon>
       </div>
       <div class="navigation-links">
+        <span
+          class="tab-indicator"
+          :class="{ dragging: tabIndicatorDragging }"
+          :style="tabIndicatorStyle"
+        ></span>
         <router-link to="/" :class="{ active: $route.name === 'home' }">{{
           $t('nav.home')
         }}</router-link>
@@ -28,7 +38,11 @@
       </div>
       <div class="right-part">
         <div class="search-box">
-          <div class="container" :class="{ active: inputFocus }">
+          <div
+            class="container"
+            :class="{ active: inputFocus || mobileSearchOpen }"
+            @click="openMobileSearch"
+          >
             <svg-icon icon-class="search" />
             <div class="input">
               <input
@@ -36,9 +50,10 @@
                 v-model="keywords"
                 type="search"
                 :placeholder="inputFocus ? '' : $t('nav.search')"
-                @keydown.enter="doSearch"
+                @keydown.enter.prevent="doSearch"
+                @keydown.esc="closeMobileSearch"
                 @focus="inputFocus = true"
-                @blur="inputFocus = false"
+                @blur="handleSearchBlur"
               />
             </div>
           </div>
@@ -46,8 +61,8 @@
         <img
           class="avatar"
           :src="avatarUrl"
-          @click="showUserProfileMenu"
           loading="lazy"
+          @click="showUserProfileMenu"
         />
       </div>
     </nav>
@@ -102,6 +117,9 @@ export default {
       keywords: '',
       enableWin32Titlebar: false,
       enableLinuxTitlebar: false,
+      mobileSearchOpen: false,
+      tabPosition: 0,
+      tabIndicatorDragging: false,
     };
   },
   computed: {
@@ -112,10 +130,20 @@ export default {
     avatarUrl() {
       return this.data?.user?.avatarUrl && this.isLooseLoggedIn
         ? `${this.data?.user?.avatarUrl}?param=512y512`
-        : 'http://s4.music.126.net/style/web2/img/default/default_avatar.jpg?param=60y60';
+        : 'https://s4.music.126.net/style/web2/img/default/default_avatar.jpg?param=60y60';
     },
     hasCustomTitlebar() {
       return this.enableWin32Titlebar || this.enableLinuxTitlebar;
+    },
+    tabIndicatorStyle() {
+      return {
+        transform: `translate3d(${this.tabPosition * 100}%, 0, 0)`,
+      };
+    },
+  },
+  watch: {
+    '$route.name'() {
+      this.syncTabPosition();
     },
   },
   created() {
@@ -128,23 +156,69 @@ export default {
       this.enableLinuxTitlebar = true;
     }
   },
+  mounted() {
+    window.addEventListener('android-close-search', this.closeMobileSearch);
+    window.addEventListener('android-tab-swipe', this.handleTabSwipe);
+    this.syncTabPosition();
+  },
+  beforeDestroy() {
+    window.removeEventListener('android-close-search', this.closeMobileSearch);
+    window.removeEventListener('android-tab-swipe', this.handleTabSwipe);
+    document.body.removeAttribute('data-mobile-search-open');
+  },
   methods: {
+    syncTabPosition() {
+      const index = ['home', 'explore', 'library'].indexOf(this.$route.name);
+      if (index < 0) return;
+      this.tabIndicatorDragging = false;
+      this.tabPosition = index;
+    },
+    handleTabSwipe(event) {
+      this.tabIndicatorDragging = Boolean(event.detail?.dragging);
+      this.tabPosition = Math.max(
+        0,
+        Math.min(2, Number(event.detail?.position) || 0)
+      );
+    },
     go(where) {
       if (where === 'back') this.$router.go(-1);
       else this.$router.go(1);
     },
     doSearch() {
+      this.keywords = this.keywords.trim();
       if (!this.keywords) return;
       if (
         this.$route.name === 'search' &&
         this.$route.params.keywords === this.keywords
       ) {
+        this.closeMobileSearch();
         return;
       }
       this.$router.push({
         name: 'search',
         params: { keywords: this.keywords },
       });
+      this.closeMobileSearch();
+    },
+    openMobileSearch() {
+      if (process.env.VUE_APP_PLATFORM === 'android') {
+        this.mobileSearchOpen = true;
+        document.body.setAttribute('data-mobile-search-open', '');
+      }
+      this.$nextTick(() => this.$refs.searchInput?.focus());
+    },
+    closeMobileSearch() {
+      this.mobileSearchOpen = false;
+      this.inputFocus = false;
+      document.body.removeAttribute('data-mobile-search-open');
+      this.$refs.searchInput?.blur();
+    },
+    handleSearchBlur() {
+      this.inputFocus = false;
+      if (process.env.VUE_APP_PLATFORM === 'android') {
+        this.mobileSearchOpen = false;
+        document.body.removeAttribute('data-mobile-search-open');
+      }
     },
     showUserProfileMenu(e) {
       this.$refs.userProfileMenu.openMenu(e);
@@ -161,7 +235,10 @@ export default {
       window.open('https://github.com/qier222/YesPlayMusic');
     },
     toLogin() {
-      if (process.env.IS_ELECTRON === true) {
+      if (
+        process.env.IS_ELECTRON === true ||
+        process.env.VUE_APP_PLATFORM === 'android'
+      ) {
         this.$router.push({ name: 'loginAccount' });
       } else {
         this.$router.push({ name: 'login' });
@@ -230,6 +307,7 @@ nav.has-custom-titlebar {
 .navigation-links {
   flex: 1;
   display: flex;
+  position: relative;
   justify-content: center;
   text-transform: uppercase;
   user-select: none;
@@ -257,6 +335,10 @@ nav.has-custom-titlebar {
   }
   a.active {
     color: var(--color-primary);
+  }
+
+  .tab-indicator {
+    display: none;
   }
 }
 

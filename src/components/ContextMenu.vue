@@ -31,14 +31,45 @@ export default {
   },
   methods: {
     setMenu(top, left) {
-      let heightOffset = this.player.enabled ? 64 : 0;
-      let largestHeight =
-        window.innerHeight - this.$refs.menu.offsetHeight - heightOffset;
-      let largestWidth = window.innerWidth - this.$refs.menu.offsetWidth - 25;
-      if (top > largestHeight) top = largestHeight;
-      if (left > largestWidth) left = largestWidth;
-      this.top = top + 'px';
-      this.left = left + 'px';
+      const menu = this.$refs.menu;
+      const isAndroid =
+        document.body.getAttribute('data-platform') === 'android';
+      const nav = isAndroid ? document.querySelector('nav') : null;
+      const player = document.querySelector('.player');
+      const playerVisible =
+        player && getComputedStyle(player).display !== 'none';
+      const topBoundary = nav ? nav.getBoundingClientRect().bottom + 8 : 8;
+      const bottomBoundary = playerVisible
+        ? player.getBoundingClientRect().top - 8
+        : window.innerHeight - 8;
+      const availableHeight = Math.max(160, bottomBoundary - topBoundary);
+
+      menu.style.maxHeight = `${availableHeight}px`;
+      const menuHeight = menu.getBoundingClientRect().height;
+      const menuWidth = menu.getBoundingClientRect().width;
+      const largestTop = Math.max(topBoundary, bottomBoundary - menuHeight);
+      const largestLeft = Math.max(8, window.innerWidth - menuWidth - 8);
+      top = Math.max(topBoundary, Math.min(top, largestTop));
+      left = Math.max(8, Math.min(left, largestLeft));
+
+      let fixedContainingBlock = menu.parentElement;
+      while (fixedContainingBlock && fixedContainingBlock !== document.body) {
+        const style = getComputedStyle(fixedContainingBlock);
+        if (
+          style.transform !== 'none' ||
+          style.perspective !== 'none' ||
+          style.filter !== 'none'
+        ) {
+          break;
+        }
+        fixedContainingBlock = fixedContainingBlock.parentElement;
+      }
+      const containingRect =
+        fixedContainingBlock && fixedContainingBlock !== document.body
+          ? fixedContainingBlock.getBoundingClientRect()
+          : { top: 0, left: 0 };
+      this.top = top - containingRect.top + 'px';
+      this.left = left - containingRect.left + 'px';
     },
 
     closeMenu() {
@@ -85,6 +116,10 @@ export default {
   padding: 6px;
   z-index: 1000;
   -webkit-app-region: no-drag;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   transition: background 125ms ease-out, opacity 125ms ease-out,
     transform 125ms ease-out;
 

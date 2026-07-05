@@ -14,6 +14,8 @@
 
 ---
 
+> Android 移植版的构建与 API 配置请查看 [README_ANDROID.md](README_ANDROID.md)。
+
 <br />
 <p align="center">
   <a href="https://music.qier222.com" target="blank">

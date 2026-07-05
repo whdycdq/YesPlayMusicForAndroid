@@ -47,6 +47,8 @@ export function loginQrCodeKey() {
     method: 'get',
     params: {
       timestamp: new Date().getTime(),
+      ua: 'pc',
+      cookie: '{}',
     },
   });
 }
@@ -82,6 +84,9 @@ export function loginQrCodeCheck(key) {
     params: {
       key,
       timestamp: new Date().getTime(),
+      noCookie: true,
+      ua: 'pc',
+      cookie: '{}',
     },
   });
 }

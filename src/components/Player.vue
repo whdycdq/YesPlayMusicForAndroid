@@ -69,6 +69,13 @@
           </div>
         </div>
         <div class="blank"></div>
+        <button
+          v-if="isAndroid"
+          class="mobile-lyrics-trigger"
+          type="button"
+          aria-label="打开歌词"
+          @click.stop="toggleLyrics"
+        ></button>
       </div>
       <div class="middle-control-buttons">
         <div class="blank"></div>
@@ -215,6 +222,9 @@ export default {
     },
     playing() {
       return this.player.playing;
+    },
+    isAndroid() {
+      return process.env.VUE_APP_PLATFORM === 'android';
     },
     audioSource() {
       return this.player._howler?._src.includes('kuwo.cn')
@@ -377,6 +387,20 @@ export default {
 
 .playing {
   display: flex;
+  position: relative;
+}
+
+.mobile-lyrics-trigger {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .playing .container {

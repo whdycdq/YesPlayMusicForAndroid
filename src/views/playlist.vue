@@ -167,6 +167,7 @@
     <TrackList
       :id="playlist.id"
       :tracks="filteredTracks"
+      :track-ids="playlist.trackIds"
       type="playlist"
       :extra-context-menu-item="
         isUserOwnPlaylist ? ['removeTrackFromPlaylist'] : []

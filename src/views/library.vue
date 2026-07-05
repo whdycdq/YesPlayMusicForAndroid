@@ -1,5 +1,5 @@
 <template>
-  <div v-show="show" ref="library">
+  <div v-show="show" ref="library" class="library-page">
     <h1>
       <img
         class="avatar"

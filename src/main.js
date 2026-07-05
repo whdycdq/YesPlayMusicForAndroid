@@ -11,6 +11,8 @@ import { dailyTask } from '@/utils/common';
 import '@/assets/css/global.scss';
 import NProgress from 'nprogress';
 import '@/assets/css/nprogress.css';
+import '@/assets/css/android.scss';
+import { initAndroidPlatform } from '@/utils/androidPlatform';
 
 window.resetApp = () => {
   localStorage.clear();
@@ -39,6 +41,7 @@ Vue.config.productionTip = false;
 
 NProgress.configure({ showSpinner: false, trickleSpeed: 100 });
 dailyTask();
+initAndroidPlatform(router, store);
 
 new Vue({
   i18n,

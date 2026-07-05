@@ -1,6 +1,7 @@
 import router from '@/router';
 import { doLogout, getCookie } from '@/utils/auth';
 import axios from 'axios';
+import { getNeteaseApiBaseUrl } from '@/utils/apiEndpoint';
 
 let baseURL = '';
 // Web 和 Electron 跑在不同端口避免同时启动时冲突
@@ -11,7 +12,7 @@ if (process.env.IS_ELECTRON) {
     baseURL = process.env.VUE_APP_ELECTRON_API_URL_DEV;
   }
 } else {
-  baseURL = process.env.VUE_APP_NETEASE_API_URL;
+  baseURL = getNeteaseApiBaseUrl();
 }
 
 const service = axios.create({
@@ -21,6 +22,10 @@ const service = axios.create({
 });
 
 service.interceptors.request.use(function (config) {
+  if (process.env.VUE_APP_PLATFORM === 'android') {
+    config.baseURL = getNeteaseApiBaseUrl();
+    baseURL = config.baseURL;
+  }
   if (!config.params) config.params = {};
   if (baseURL.length) {
     if (
@@ -87,11 +92,18 @@ service.interceptors.response.use(
       doLogout();
 
       // 導向登入頁面
-      if (process.env.IS_ELECTRON === true) {
+      if (
+        process.env.IS_ELECTRON === true ||
+        process.env.VUE_APP_PLATFORM === 'android'
+      ) {
         router.push({ name: 'loginAccount' });
       } else {
         router.push({ name: 'login' });
       }
+    }
+
+    if (error.config?.url?.includes('/login')) {
+      return Promise.reject(error);
     }
   }
 );

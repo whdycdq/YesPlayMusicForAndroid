@@ -27,6 +27,26 @@
         </div>
       </div>
 
+      <div v-if="isAndroid" class="item android-api-endpoint">
+        <div class="left">
+          <div class="title">网易云 API 服务地址</div>
+          <div class="description">
+            登录账号时建议使用你自己部署的 NeteaseCloudMusicApi。
+          </div>
+        </div>
+        <div class="right">
+          <input
+            v-model.trim="apiEndpointInput"
+            class="text-input margin-right-0"
+            type="url"
+            inputmode="url"
+            autocomplete="off"
+            placeholder="https://example.com"
+          />
+          <button @click="saveApiEndpoint">保存</button>
+        </div>
+      </div>
+
       <div class="item">
         <div class="left">
           <div class="title"> {{ $t('settings.language') }} </div>
@@ -811,11 +831,16 @@
 import { mapState, mapActions } from 'vuex';
 import { isLooseLoggedIn, doLogout } from '@/utils/auth';
 import { auth as lastfmAuth } from '@/api/lastfm';
-import { 
-  changeAppearance, 
-  changeThemeColor, 
-  bytesToSize } from '@/utils/common';
+import {
+  changeAppearance,
+  changeThemeColor,
+  bytesToSize,
+} from '@/utils/common';
 import { countDBSize, clearDB } from '@/utils/db';
+import {
+  getNeteaseApiBaseUrl,
+  setNeteaseApiBaseUrl,
+} from '@/utils/apiEndpoint';
 import pkg from '../../package.json';
 
 const electron =
@@ -845,12 +870,16 @@ export default {
         recording: false,
       },
       recordedShortcut: [],
+      apiEndpointInput: getNeteaseApiBaseUrl(),
     };
   },
   computed: {
     ...mapState(['player', 'settings', 'data', 'lastfm']),
     isElectron() {
       return process.env.IS_ELECTRON;
+    },
+    isAndroid() {
+      return process.env.VUE_APP_PLATFORM === 'android';
     },
     isMac() {
       return /macintosh|mac os x/i.test(navigator.userAgent);
@@ -1365,6 +1394,15 @@ export default {
   },
   methods: {
     ...mapActions(['showToast']),
+    saveApiEndpoint() {
+      const value = this.apiEndpointInput;
+      if (!/^https?:\/\/[^ ]+$/i.test(value)) {
+        this.showToast('请输入完整的 HTTP 或 HTTPS 地址');
+        return;
+      }
+      this.apiEndpointInput = setNeteaseApiBaseUrl(value);
+      this.showToast('API 服务地址已更新');
+    },
     getAllOutputDevices() {
       navigator.mediaDevices.enumerateDevices().then(devices => {
         this.allOutputDevices = devices.filter(device => {
@@ -1679,6 +1717,17 @@ input.text-input {
   color: var(--color-text);
   font-weight: 600;
   font-size: 16px;
+}
+
+.android-api-endpoint {
+  .right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  input.text-input {
+    width: 320px;
+  }
 }
 input::-webkit-outer-spin-button,
 input::-webkit-inner-spin-button {

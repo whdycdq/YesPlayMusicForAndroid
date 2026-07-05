@@ -135,7 +135,10 @@ const routes = [
 ];
 
 const router = new VueRouter({
-  mode: process.env.IS_ELECTRON ? 'hash' : 'history',
+  mode:
+    process.env.IS_ELECTRON || process.env.VUE_APP_PLATFORM === 'android'
+      ? 'hash'
+      : 'history',
   routes,
 });
 
@@ -145,27 +148,26 @@ VueRouter.prototype.push = function push(location) {
 };
 
 router.beforeEach((to, from, next) => {
-  // 需要登录的逻辑
   if (to.meta.requireAccountLogin) {
-    if (isAccountLoggedIn()) {
-      next();
-    } else {
-      next({ path: '/login/account' });
-    }
+    return isAccountLoggedIn() ? next() : next({ path: '/login/account' });
   }
+
   if (to.meta.requireLogin) {
     if (isLooseLoggedIn()) {
-      next();
+      return next();
     } else {
-      if (process.env.IS_ELECTRON === true) {
-        next({ path: '/login/account' });
+      if (
+        process.env.IS_ELECTRON === true ||
+        process.env.VUE_APP_PLATFORM === 'android'
+      ) {
+        return next({ path: '/login/account' });
       } else {
-        next({ path: '/login' });
+        return next({ path: '/login' });
       }
     }
-  } else {
-    next();
   }
+
+  return next();
 });
 
 export default router;

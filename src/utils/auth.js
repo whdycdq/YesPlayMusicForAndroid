@@ -2,13 +2,31 @@ import Cookies from 'js-cookie';
 import { logout } from '@/api/auth';
 import store from '@/store';
 
-export function setCookies(string) {
-  const cookies = string.split(';;');
-  cookies.map(cookie => {
-    document.cookie = cookie;
-    const cookieKeyValue = cookie.split(';')[0].split('=');
-    localStorage.setItem(`cookie-${cookieKeyValue[0]}`, cookieKeyValue[1]);
-  });
+export function setCookies(string, allowedKeys = null) {
+  if (typeof string !== 'string' || string.length === 0) return;
+
+  const allowed = allowedKeys ? new Set(allowedKeys) : null;
+  const cookieAttributes = new Set([
+    'domain',
+    'expires',
+    'httponly',
+    'max-age',
+    'path',
+    'samesite',
+    'secure',
+  ]);
+  const cookiePattern = /(?:^|;{1,2}\s*)([^=;\s]+)=([^;]*)/g;
+  let match;
+
+  while ((match = cookiePattern.exec(string)) !== null) {
+    const key = match[1].trim();
+    const value = match[2].trim();
+    if (!key || cookieAttributes.has(key.toLowerCase())) continue;
+    if (allowed && !allowed.has(key)) continue;
+
+    document.cookie = `${key}=${value}; path=/`;
+    localStorage.setItem(`cookie-${key}`, value);
+  }
 }
 
 export function getCookie(key) {

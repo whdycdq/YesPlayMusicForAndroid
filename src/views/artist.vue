@@ -24,8 +24,14 @@
           {{ artist.briefDesc }}
         </div>
         <div class="buttons">
-          <ButtonTwoTone icon-class="play" @click.native="playPopularSongs()">
-            {{ $t('common.play') }}
+          <ButtonTwoTone
+            icon-class="play"
+            :icon-button="isAndroidBuild"
+            :shape="isAndroidBuild ? 'round' : 'square'"
+            :horizontal-padding="isAndroidBuild ? 0 : 16"
+            @click.native="playPopularSongs()"
+          >
+            <span v-if="!isAndroidBuild">{{ $t('common.play') }}</span>
           </ButtonTwoTone>
           <ButtonTwoTone color="grey" @click.native="followArtist">
             <span v-if="artist.followed">{{ $t('artist.following') }}</span>
@@ -188,6 +194,7 @@ import {
 import { getTrackDetail } from '@/api/track';
 import locale from '@/locale';
 import { isAccountLoggedIn } from '@/utils/auth';
+import { isAndroidBuild } from '@/utils/androidPlatform';
 import NProgress from 'nprogress';
 
 import ButtonTwoTone from '@/components/ButtonTwoTone.vue';
@@ -216,6 +223,7 @@ export default {
   },
   data() {
     return {
+      isAndroidBuild,
       show: false,
       artist: {
         img1v1Url:

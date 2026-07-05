@@ -1,0 +1,14 @@
+YesPlayMusic Android release certificate
+
+Subject:
+CN=YesPlayMusic Android, OU=Mobile, O=YesPlayMusic,
+L=Shanghai, ST=Shanghai, C=CN
+
+Key algorithm: RSA 4096-bit
+Signature algorithm: SHA256withRSA
+Validity: 10,000 days
+Alias: yesplaymusic-release
+
+SHA-256 certificate fingerprint:
+29:42:A5:31:5E:3B:AB:D7:09:3B:52:5A:10:D7:B4:5E:
+B9:E1:63:3C:16:FB:4B:DC:58:3C:5E:B3:6F:6E:28:8B

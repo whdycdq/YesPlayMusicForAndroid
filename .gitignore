@@ -1,6 +1,14 @@
 .DS_Store
 node_modules
 /dist
+/android/app/build
+/android/.gradle
+/android/local.properties
+/.jdk
+/android/signing/*.p12
+/android/signing/*.jks
+/android/keystore.properties
+/artifacts/
 
 # local env files
 .env

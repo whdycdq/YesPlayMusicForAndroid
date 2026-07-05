@@ -7,6 +7,10 @@
   "scripts": {
     "serve": "vue-cli-service serve",
     "build": "vue-cli-service build",
+    "build:android:web": "node --openssl-legacy-provider node_modules/@vue/cli-service/bin/vue-cli-service.js build --mode android",
+    "android:sync": "npm run build:android:web && cap sync android",
+    "android:apk": "npm run android:sync && node scripts/build-android.js assembleDebug",
+    "android:release": "npm run android:sync && node scripts/build-android.js assembleRelease",
     "lint": "vue-cli-service lint",
     "electron:build": "vue-cli-service electron:build -p never",
     "electron:build-all": "vue-cli-service electron:build -p never -mwl",
@@ -23,9 +27,13 @@
   },
   "main": "background.js",
   "engines": {
-    "node": "14 || 16"
+    "node": ">=22"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/status-bar": "^8.0.0",
     "@neteaseapireborn/api": "^4.29.7",
     "@unblockneteasemusic/rust-napi": "^0.4.0",
     "axios": "^0.26.1",
@@ -79,6 +87,7 @@
     "x11": "^2.3.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "@types/node": "^17.0.0",
     "@vue/cli-plugin-babel": "~4.5.0",
     "@vue/cli-plugin-eslint": "~4.5.0",

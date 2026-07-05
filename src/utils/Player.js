@@ -11,6 +11,14 @@ import { isCreateMpris, isCreateTray } from '@/utils/platform';
 import { Howl, Howler } from 'howler';
 import shuffle from 'lodash/shuffle';
 import { decode as base642Buffer } from '@/utils/base64';
+import AndroidAudioPlayer from '@/utils/AndroidAudioPlayer';
+import { isAndroidApp } from '@/utils/androidPlatform';
+import {
+  getAndroidPlaybackState,
+  initAndroidMediaControls,
+  updateAndroidMediaMetadata,
+  updateAndroidPlaybackState,
+} from '@/utils/androidMediaControls';
 
 const PLAY_PAUSE_FADE_DURATION = 200;
 
@@ -98,12 +106,23 @@ export default class {
     Object.defineProperty(this, '_howler', {
       enumerable: false,
     });
+    Object.defineProperty(this, '_trackRequestID', {
+      value: 0,
+      writable: true,
+      enumerable: false,
+    });
+    Object.defineProperty(this, '_playlistRequestID', {
+      value: 0,
+      writable: true,
+      enumerable: false,
+    });
 
     // init
     this._init();
 
     window.yesplaymusic = {};
     window.yesplaymusic.player = this;
+    initAndroidMediaControls(this);
   }
 
   get repeatMode() {
@@ -241,6 +260,11 @@ export default class {
   }
   _setPlaying(isPlaying) {
     this._playing = isPlaying;
+    updateAndroidPlaybackState(
+      this._playing,
+      this._howler?.seek() || 0,
+      this.currentTrackDuration
+    );
     if (isCreateTray) {
       ipcRenderer?.send('updateTrayPlayState', this._playing);
     }
@@ -330,16 +354,32 @@ export default class {
     }
   }
   _playAudioSource(source, autoplay = true) {
-    Howler.unload();
-    this._howler = new Howl({
-      src: [source],
-      html5: true,
-      preload: true,
-      format: ['mp3', 'flac'],
-      onend: () => {
-        this._nextTrackCallback();
-      },
-    });
+    if (isAndroidApp) {
+      this._howler?.stop();
+      const androidPlayer = new AndroidAudioPlayer(source, this.volume);
+      this._howler = androidPlayer;
+      getAndroidPlaybackState().then(state => {
+        if (
+          this._howler === androidPlayer &&
+          state?.source === source &&
+          typeof state.playing === 'boolean'
+        ) {
+          androidPlayer.syncNativeState(state);
+          this._setPlaying(state.playing);
+        }
+      });
+    } else {
+      Howler.unload();
+      this._howler = new Howl({
+        src: [source],
+        html5: true,
+        preload: true,
+        format: ['mp3', 'flac'],
+        onend: () => {
+          this._nextTrackCallback();
+        },
+      });
+    }
     this._howler.on('loaderror', (_, errCode) => {
       // https://developer.mozilla.org/en-US/docs/Web/API/MediaError/code
       // code 3: MEDIA_ERR_DECODE
@@ -396,21 +436,28 @@ export default class {
     });
   }
   _getAudioSourceFromNetease(track) {
+    const outerURL = `https://music.163.com/song/media/outer/url?id=${track.id}.mp3`;
     if (isAccountLoggedIn()) {
-      return getMP3(track.id).then(result => {
-        if (!result.data[0]) return null;
-        if (!result.data[0].url) return null;
-        if (result.data[0].freeTrialInfo !== null) return null; // 跳过只能试听的歌曲
-        const source = result.data[0].url.replace(/^http:/, 'https:');
-        if (store.state.settings.automaticallyCacheSongs) {
-          cacheTrackSource(track, source, result.data[0].br);
-        }
-        return source;
-      });
+      const androidFallback =
+        process.env.VUE_APP_PLATFORM === 'android' ? outerURL : null;
+      const apiSource = getMP3(track.id)
+        .then(result => {
+          const audio = result?.data?.[0];
+          if (!audio?.url || audio.freeTrialInfo !== null)
+            return androidFallback;
+          const source = audio.url.replace(/^http:/, 'https:');
+          if (store.state.settings.automaticallyCacheSongs) {
+            cacheTrackSource(track, source, audio.br);
+          }
+          return source;
+        })
+        .catch(() => androidFallback);
+
+      return process.env.VUE_APP_PLATFORM === 'android'
+        ? Promise.race([apiSource, delay(900).then(() => outerURL)])
+        : apiSource;
     } else {
-      return new Promise(resolve => {
-        resolve(`https://music.163.com/song/media/outer/url?id=${track.id}`);
-      });
+      return Promise.resolve(outerURL);
     }
   }
   async _getAudioSourceFromUnblockMusic(track) {
@@ -482,6 +529,9 @@ export default class {
     return this._getAudioSourceBlobURL(buffer);
   }
   _getAudioSource(track) {
+    if (isAndroidApp) {
+      return this._getAudioSourceFromNetease(track);
+    }
     return this._getAudioSourceFromCache(String(track.id))
       .then(source => {
         return source ?? this._getAudioSourceFromNetease(track);
@@ -493,13 +543,22 @@ export default class {
   _replaceCurrentTrack(
     id,
     autoplay = true,
-    ifUnplayableThen = UNPLAYABLE_CONDITION.PLAY_NEXT_TRACK
+    ifUnplayableThen = UNPLAYABLE_CONDITION.PLAY_NEXT_TRACK,
+    knownTrack = null
   ) {
+    const requestID = ++this._trackRequestID;
     if (autoplay && this._currentTrack.name) {
       this._scrobble(this.currentTrack, this._howler?.seek());
     }
-    return getTrackDetail(id).then(data => {
+    if (autoplay) {
+      this._howler?.stop();
+      this._setPlaying(false);
+    }
+
+    const replaceTrack = data => {
+      if (requestID !== this._trackRequestID) return false;
       const track = data.songs[0];
+      if (!track) return false;
       this._currentTrack = track;
       this._updateMediaSessionMetaData(track);
       return this._replaceCurrentTrackAudio(
@@ -508,7 +567,12 @@ export default class {
         true,
         ifUnplayableThen
       );
-    });
+    };
+
+    if (knownTrack?.id === id) {
+      return replaceTrack({ songs: [knownTrack] });
+    }
+    return getTrackDetail(id).then(replaceTrack);
   }
   /**
    * @returns 是否成功加载音频，并使用加载完成的音频替换了howler实例
@@ -520,16 +584,13 @@ export default class {
     ifUnplayableThen = UNPLAYABLE_CONDITION.PLAY_NEXT_TRACK
   ) {
     return this._getAudioSource(track).then(source => {
+      if (track.id !== this.currentTrackID) return false;
       if (source) {
-        let replaced = false;
-        if (track.id === this.currentTrackID) {
-          this._playAudioSource(source, autoplay);
-          replaced = true;
-        }
+        this._playAudioSource(source, autoplay);
         if (isCacheNextTrack) {
           this._cacheNextTrack();
         }
-        return replaced;
+        return true;
       } else {
         store.dispatch('showToast', `无法播放 ${track.name}`);
         switch (ifUnplayableThen) {
@@ -600,9 +661,6 @@ export default class {
     }
   }
   _updateMediaSessionMetaData(track) {
-    if ('mediaSession' in navigator === false) {
-      return;
-    }
     let artists = track.ar.map(a => a.name);
     const metadata = {
       title: track.name,
@@ -625,6 +683,10 @@ export default class {
       url: '/trackid/' + track.id,
     };
 
+    updateAndroidMediaMetadata(track, this.currentTrackDuration);
+    if ('mediaSession' in navigator === false) {
+      return;
+    }
     navigator.mediaSession.metadata = new window.MediaMetadata(metadata);
     if (isCreateMpris) {
       this._updateMprisState(track, metadata);
@@ -807,15 +869,21 @@ export default class {
     localStorage.setItem('player', JSON.stringify(player));
   }
 
-  pause() {
-    this._howler?.fade(this.volume, 0, PLAY_PAUSE_FADE_DURATION);
-
-    this._howler?.once('fade', () => {
+  pause(immediate = false) {
+    const completePause = () => {
       this._howler?.pause();
       this._setPlaying(false);
       setTitle(null);
       this._pauseDiscordPresence(this._currentTrack);
-    });
+    };
+
+    if (immediate || !this._howler?.playing()) {
+      completePause();
+      return;
+    }
+
+    this._howler.fade(this.volume, 0, PLAY_PAUSE_FADE_DURATION);
+    this._howler.once('fade', completePause);
   }
   play() {
     if (this._howler?.playing()) return;
@@ -857,6 +925,11 @@ export default class {
     }
     if (time !== null) {
       this._howler?.seek(time);
+      updateAndroidPlaybackState(
+        this._playing,
+        time,
+        this.currentTrackDuration
+      );
       if (this._playing)
         this._playDiscordPresence(this._currentTrack, this.seek(null, false));
     }
@@ -874,15 +947,19 @@ export default class {
     if (this._howler?._sounds.length <= 0 || !this._howler?._sounds[0]._node) {
       return;
     }
-    this._howler?._sounds[0]._node.setSinkId(store.state.settings.outputDevice);
+    const node = this._howler._sounds[0]._node;
+    if (typeof node.setSinkId !== 'function') return;
+    node.setSinkId(store.state.settings.outputDevice).catch(() => {});
   }
 
   replacePlaylist(
     trackIDs,
     playlistSourceID,
     playlistSourceType,
-    autoPlayTrackID = 'first'
+    autoPlayTrackID = 'first',
+    knownTrack = null
   ) {
+    this._playlistRequestID += 1;
     this._isPersonalFM = false;
     this.list = trackIDs;
     this.current = 0;
@@ -892,46 +969,56 @@ export default class {
     };
     if (this.shuffle) this._shuffleTheList(autoPlayTrackID);
     if (autoPlayTrackID === 'first') {
-      this._replaceCurrentTrack(this.list[0]);
+      this._replaceCurrentTrack(this.list[0], true, undefined, knownTrack);
     } else {
       this.current = this.list.indexOf(autoPlayTrackID);
-      this._replaceCurrentTrack(autoPlayTrackID);
+      this._replaceCurrentTrack(autoPlayTrackID, true, undefined, knownTrack);
     }
   }
   playAlbumByID(id, trackID = 'first') {
+    const requestID = ++this._playlistRequestID;
     getAlbum(id).then(data => {
+      if (requestID !== this._playlistRequestID) return;
       let trackIDs = data.songs.map(t => t.id);
       this.replacePlaylist(trackIDs, id, 'album', trackID);
     });
   }
   playPlaylistByID(id, trackID = 'first', noCache = false) {
+    const requestID = ++this._playlistRequestID;
     console.debug(
       `[debug][Player.js] playPlaylistByID 👉 id:${id} trackID:${trackID} noCache:${noCache}`
     );
     getPlaylistDetail(id, noCache).then(data => {
+      if (requestID !== this._playlistRequestID) return;
       let trackIDs = data.playlist.trackIds.map(t => t.id);
       this.replacePlaylist(trackIDs, id, 'playlist', trackID);
     });
   }
   playArtistByID(id, trackID = 'first') {
+    const requestID = ++this._playlistRequestID;
     getArtist(id).then(data => {
+      if (requestID !== this._playlistRequestID) return;
       let trackIDs = data.hotSongs.map(t => t.id);
       this.replacePlaylist(trackIDs, id, 'artist', trackID);
     });
   }
-  playTrackOnListByID(id, listName = 'default') {
+  playTrackOnListByID(id, listName = 'default', knownTrack = null) {
+    this._playlistRequestID += 1;
     if (listName === 'default') {
       this._current = this._list.findIndex(t => t === id);
     }
-    this._replaceCurrentTrack(id);
+    this._replaceCurrentTrack(id, true, undefined, knownTrack);
   }
   playIntelligenceListById(id, trackID = 'first', noCache = false) {
+    const requestID = ++this._playlistRequestID;
     getPlaylistDetail(id, noCache).then(data => {
+      if (requestID !== this._playlistRequestID) return;
       const randomId = Math.floor(
-        Math.random() * (data.playlist.trackIds.length + 1)
+        Math.random() * data.playlist.trackIds.length
       );
       const songId = data.playlist.trackIds[randomId].id;
       intelligencePlaylist({ id: songId, pid: id }).then(result => {
+        if (requestID !== this._playlistRequestID) return;
         let trackIDs = result.data.map(t => t.id);
         this.replacePlaylist(trackIDs, id, 'playlist', trackID);
       });

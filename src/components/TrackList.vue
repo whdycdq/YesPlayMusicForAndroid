@@ -58,6 +58,24 @@
         @click="removeTrackFromCloudDisk"
         >从云盘中删除</div
       >
+      <template v-if="androidContextMenu">
+        <hr v-if="rightClickedArtists.length > 0 || rightClickedAlbum.id" />
+        <div
+          v-for="artist in rightClickedArtists"
+          :key="`artist-${artist.id}`"
+          class="item"
+          @click="goToArtist(artist.id)"
+        >
+          查看歌手：{{ artist.name }}
+        </div>
+        <div
+          v-if="rightClickedAlbum.id"
+          class="item"
+          @click="goToAlbum(rightClickedAlbum.id)"
+        >
+          查看专辑：{{ rightClickedAlbum.name }}
+        </div>
+      </template>
     </ContextMenu>
 
     <div :style="listStyles">
@@ -67,8 +85,17 @@
         :track-prop="track"
         :track-no="index + 1"
         :highlight-playing-track="highlightPlayingTrack"
-        @dblclick.native="playThisList(track.id || track.songId)"
-        @click.right.native="openMenu($event, track, index)"
+        @touchstart.native="startTrackLongPress($event, track, index)"
+        @touchmove.native="moveTrackLongPress($event)"
+        @touchend.native="endTrackLongPress"
+        @touchcancel.native="cancelTrackLongPress"
+        @click.capture.native="
+          playThisListOnAndroid($event, track.id || track.songId, track)
+        "
+        @dblclick.native="
+          playThisListOnDesktop(track.id || track.songId, track)
+        "
+        @contextmenu.native="handleContextMenu($event, track, index)"
       />
     </div>
   </div>
@@ -141,6 +168,10 @@ export default {
       type: String,
       default: 'id',
     },
+    trackIds: {
+      type: Array,
+      default: () => [],
+    },
   },
   data() {
     return {
@@ -152,6 +183,13 @@ export default {
       },
       rightClickedTrackIndex: -1,
       listStyles: {},
+      androidContextMenu: process.env.VUE_APP_PLATFORM === 'android',
+      longPressTimer: null,
+      longPressStartX: 0,
+      longPressStartY: 0,
+      longPressTrack: null,
+      longPressTrackIndex: -1,
+      ignoreClickUntil: 0,
     };
   },
   computed: {
@@ -169,6 +207,25 @@ export default {
           }
         : this.rightClickedTrack;
     },
+    rightClickedPlayableTrack() {
+      return this.type === 'cloudDisk'
+        ? this.rightClickedTrack?.simpleSong || {}
+        : this.rightClickedTrack || {};
+    },
+    rightClickedArtists() {
+      return (
+        this.rightClickedPlayableTrack.ar ||
+        this.rightClickedPlayableTrack.artists ||
+        []
+      ).filter(artist => artist?.id);
+    },
+    rightClickedAlbum() {
+      return (
+        this.rightClickedPlayableTrack.al ||
+        this.rightClickedPlayableTrack.album ||
+        {}
+      );
+    },
   },
   created() {
     if (this.type === 'tracklist') {
@@ -179,9 +236,95 @@ export default {
       };
     }
   },
+  beforeDestroy() {
+    this.cancelTrackLongPress();
+  },
   methods: {
     ...mapMutations(['updateModal']),
     ...mapActions(['nextTrack', 'showToast', 'likeATrack']),
+    isAndroid() {
+      return document.body.getAttribute('data-platform') === 'android';
+    },
+    normalizeTrack(track) {
+      return this.type === 'cloudDisk' ? track.simpleSong : track;
+    },
+    getTrackIDs() {
+      const source = this.trackIds.length > 0 ? this.trackIds : this.tracks;
+      return source.map(track =>
+        typeof track === 'object' ? track.id || track.songId : track
+      );
+    },
+    playThisListOnAndroid(event, trackID, track) {
+      if (document.body.getAttribute('data-platform') !== 'android') return;
+      if (event.target.closest?.('button')) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (Date.now() < this.ignoreClickUntil) return;
+
+      this.playThisList(trackID, this.normalizeTrack(track));
+    },
+    playThisListOnDesktop(trackID, track) {
+      if (document.body.getAttribute('data-platform') === 'android') return;
+      this.playThisList(trackID, this.normalizeTrack(track));
+    },
+    startTrackLongPress(event, track, index) {
+      if (!this.isAndroid() || event.touches.length !== 1) return;
+      if (event.target.closest?.('button')) return;
+
+      this.cancelTrackLongPress();
+      const touch = event.touches[0];
+      this.longPressStartX = touch.clientX;
+      this.longPressStartY = touch.clientY;
+      this.longPressTrack = track;
+      this.longPressTrackIndex = index;
+      this.longPressTimer = window.setTimeout(() => {
+        this.ignoreClickUntil = Date.now() + 800;
+        navigator.vibrate?.(18);
+        this.openMenu(
+          {
+            x: this.longPressStartX,
+            y: this.longPressStartY,
+            preventDefault() {},
+          },
+          this.longPressTrack,
+          this.longPressTrackIndex
+        );
+        this.longPressTimer = null;
+      }, 520);
+    },
+    moveTrackLongPress(event) {
+      if (!this.longPressTimer || event.touches.length !== 1) return;
+      const touch = event.touches[0];
+      if (
+        Math.abs(touch.clientX - this.longPressStartX) > 12 ||
+        Math.abs(touch.clientY - this.longPressStartY) > 12
+      ) {
+        this.cancelTrackLongPress();
+      }
+    },
+    endTrackLongPress() {
+      this.cancelTrackLongPress();
+    },
+    cancelTrackLongPress() {
+      if (this.longPressTimer !== null) {
+        window.clearTimeout(this.longPressTimer);
+      }
+      this.longPressTimer = null;
+    },
+    goToArtist(id) {
+      this.$router.push(`/artist/${id}`);
+    },
+    goToAlbum(id) {
+      this.$router.push(`/album/${id}`);
+    },
+    handleContextMenu(event, track, index) {
+      if (this.isAndroid()) {
+        event.preventDefault();
+        return;
+      }
+      this.openMenu(event, track, index);
+    },
     openMenu(e, track, index = -1) {
       this.rightClickedTrack = track;
       this.rightClickedTrackIndex = index;
@@ -196,34 +339,67 @@ export default {
       };
       this.rightClickedTrackIndex = -1;
     },
-    playThisList(trackID) {
+    playThisList(trackID, track) {
       if (this.dbclickTrackFunc === 'default') {
-        this.playThisListDefault(trackID);
+        this.playThisListDefault(trackID, track);
       } else if (this.dbclickTrackFunc === 'none') {
         // do nothing
       } else if (this.dbclickTrackFunc === 'playTrackOnListByID') {
-        this.player.playTrackOnListByID(trackID);
+        this.player.playTrackOnListByID(trackID, 'default', track);
       } else if (this.dbclickTrackFunc === 'playPlaylistByID') {
-        this.player.playPlaylistByID(this.id, trackID);
+        this.player.replacePlaylist(
+          this.getTrackIDs(),
+          this.id,
+          'playlist',
+          trackID,
+          track
+        );
       } else if (this.dbclickTrackFunc === 'playAList') {
-        let trackIDs = this.tracks.map(t => t.id || t.songId);
-        this.player.replacePlaylist(trackIDs, this.id, 'artist', trackID);
+        this.player.replacePlaylist(
+          this.getTrackIDs(),
+          this.id,
+          'artist',
+          trackID,
+          track
+        );
       } else if (this.dbclickTrackFunc === 'dailyTracks') {
-        let trackIDs = this.tracks.map(t => t.id);
-        this.player.replacePlaylist(trackIDs, '/daily/songs', 'url', trackID);
+        this.player.replacePlaylist(
+          this.getTrackIDs(),
+          '/daily/songs',
+          'url',
+          trackID,
+          track
+        );
       } else if (this.dbclickTrackFunc === 'playCloudDisk') {
-        let trackIDs = this.tracks.map(t => t.id || t.songId);
-        this.player.replacePlaylist(trackIDs, this.id, 'cloudDisk', trackID);
+        this.player.replacePlaylist(
+          this.getTrackIDs(),
+          this.id,
+          'cloudDisk',
+          trackID,
+          track
+        );
       }
     },
-    playThisListDefault(trackID) {
+    playThisListDefault(trackID, track) {
+      const trackIDs = this.getTrackIDs();
       if (this.type === 'playlist') {
-        this.player.playPlaylistByID(this.id, trackID);
+        this.player.replacePlaylist(
+          trackIDs,
+          this.id,
+          'playlist',
+          trackID,
+          track
+        );
       } else if (this.type === 'album') {
-        this.player.playAlbumByID(this.id, trackID);
+        this.player.replacePlaylist(trackIDs, this.id, 'album', trackID, track);
       } else if (this.type === 'tracklist') {
-        let trackIDs = this.tracks.map(t => t.id);
-        this.player.replacePlaylist(trackIDs, this.id, 'artist', trackID);
+        this.player.replacePlaylist(
+          trackIDs,
+          this.id,
+          'artist',
+          trackID,
+          track
+        );
       }
     },
     play() {

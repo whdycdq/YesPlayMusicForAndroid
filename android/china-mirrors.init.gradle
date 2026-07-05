@@ -1,0 +1,21 @@
+import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+def redirectRepository = { repository ->
+    if (!(repository instanceof MavenArtifactRepository)) {
+        return
+    }
+
+    String url = repository.url.toString()
+    if (url.contains('repo.maven.apache.org') || url.contains('repo1.maven.org')) {
+        repository.setUrl('https://maven.aliyun.com/repository/central')
+    } else if (url.contains('dl.google.com')) {
+        repository.setUrl('https://maven.aliyun.com/repository/google')
+    } else if (url.contains('plugins.gradle.org')) {
+        repository.setUrl('https://maven.aliyun.com/repository/gradle-plugin')
+    }
+}
+
+gradle.beforeProject { project ->
+    project.buildscript.repositories.whenObjectAdded(redirectRepository)
+    project.repositories.whenObjectAdded(redirectRepository)
+}
