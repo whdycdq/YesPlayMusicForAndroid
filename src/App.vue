@@ -1,6 +1,6 @@
 <template>
   <div id="app" :class="{ 'user-select-none': userSelectNone }">
-    <Scrollbar v-show="!showLyrics" ref="scrollbar" />
+    <Scrollbar v-show="!showLyrics && !isAndroidBuild" ref="scrollbar" />
     <Navbar v-show="showNavbar" ref="navbar" />
     <main
       ref="main"
@@ -73,6 +73,7 @@ export default {
   data() {
     return {
       isElectron: process.env.IS_ELECTRON, // true || undefined
+      isAndroidBuild: process.env.VUE_APP_PLATFORM === 'android',
       userSelectNone: false,
       touchStartX: null,
       touchStartY: null,
