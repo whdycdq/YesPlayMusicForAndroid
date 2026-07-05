@@ -3,6 +3,9 @@ import { doLogout, getCookie } from '@/utils/auth';
 import axios from 'axios';
 import { getNeteaseApiBaseUrl } from '@/utils/apiEndpoint';
 
+const ANDROID_NETWORK_RETRY_LIMIT = 2;
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+
 let baseURL = '';
 // Web 和 Electron 跑在不同端口避免同时启动时冲突
 if (process.env.IS_ELECTRON) {
@@ -20,6 +23,41 @@ const service = axios.create({
   withCredentials: true,
   timeout: 15000,
 });
+
+function sleep(milliseconds) {
+  return new Promise(resolve => window.setTimeout(resolve, milliseconds));
+}
+
+function isIdempotentRequest(config) {
+  const method = (config?.method || 'get').toLowerCase();
+  return ['get', 'head', 'options'].includes(method);
+}
+
+function shouldRetryAndroidRequest(config, status) {
+  if (
+    process.env.VUE_APP_PLATFORM !== 'android' ||
+    !config ||
+    !isIdempotentRequest(config)
+  ) {
+    return false;
+  }
+
+  const retryCount = config.__androidNetworkRetryCount || 0;
+  if (retryCount >= ANDROID_NETWORK_RETRY_LIMIT) return false;
+
+  return status === undefined || RETRYABLE_HTTP_STATUS.has(Number(status));
+}
+
+async function retryAndroidRequest(config) {
+  const retryCount = config.__androidNetworkRetryCount || 0;
+  config.__androidNetworkRetryCount = retryCount + 1;
+  config.baseURL = getNeteaseApiBaseUrl();
+
+  const baseDelay = retryCount === 0 ? 450 : 1200;
+  const jitter = Math.floor(Math.random() * 250);
+  await sleep(baseDelay + jitter);
+  return service(config);
+}
 
 service.interceptors.request.use(function (config) {
   if (process.env.VUE_APP_PLATFORM === 'android') {
@@ -65,6 +103,12 @@ service.interceptors.request.use(function (config) {
 service.interceptors.response.use(
   response => {
     const res = response.data;
+    if (
+      shouldRetryAndroidRequest(response.config, res?.code) &&
+      RETRYABLE_HTTP_STATUS.has(Number(res?.code))
+    ) {
+      return retryAndroidRequest(response.config);
+    }
     return res;
   },
   async error => {
@@ -78,6 +122,10 @@ service.interceptors.response.use(
     } else if (error.response) {
       response = error.response;
       data = response.data;
+    }
+
+    if (shouldRetryAndroidRequest(error.config, response?.status)) {
+      return retryAndroidRequest(error.config);
     }
 
     if (
@@ -102,9 +150,7 @@ service.interceptors.response.use(
       }
     }
 
-    if (error.config?.url?.includes('/login')) {
-      return Promise.reject(error);
-    }
+    return Promise.reject(error);
   }
 );
 
